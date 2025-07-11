@@ -35,6 +35,12 @@ android {
     targetSdkVersion getExtOrIntegerDefault("targetSdkVersion")
   }
 
+  externalNativeBuild {
+      cmake {
+        path "CMakeLists.txt"
+      }
+  }
+
   buildFeatures {
     buildConfig true
   }
