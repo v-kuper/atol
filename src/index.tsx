@@ -52,3 +52,11 @@ export function callMeLater(successCB: () => void, failureCB: () => void) {
 export function promiseNumber(num: number): Promise<number> {
   return module.promiseNumber(num);
 }
+
+export function connect(
+  address: string,
+  port: string,
+  name: string
+): Promise<string> {
+  return module.connect(address, port, name);
+}

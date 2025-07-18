@@ -15,6 +15,7 @@ import {
   callMeLater,
   promiseNumber,
   reverseString,
+  connect, // Добавляем импорт функции connect
 } from 'react-native-atol';
 
 interface TestResult {
@@ -28,6 +29,11 @@ export default function App() {
   const [results, setResults] = useState<TestResult[]>([]);
   const [inputText, setInputText] = useState<string>('Hello World');
   const [inputNumber, setInputNumber] = useState<string>('5');
+
+  // Добавляем состояния для параметров подключения к кассе
+  const [ipAddress, setIpAddress] = useState<string>('192.168.1.100');
+  const [port, setPort] = useState<string>('5555');
+  const [deviceName, setDeviceName] = useState<string>('АТОЛ Касса');
 
   const addResult = (functionName: string, result: any): void => {
     const timestamp = new Date().toLocaleTimeString();
@@ -133,6 +139,71 @@ export default function App() {
     }
   };
 
+  // Новая функция для тестирования подключения к кассе
+  const testConnect = async (): Promise<void> => {
+    try {
+      // Валидация входных данных
+      if (!ipAddress.trim()) {
+        Alert.alert('Ошибка', 'Введите IP адрес кассы');
+        return;
+      }
+
+      if (!port.trim() || isNaN(parseInt(port))) {
+        Alert.alert('Ошибка', 'Введите корректный порт');
+        return;
+      }
+
+      addResult('connect', 'Подключение к кассе...');
+      console.log('Attempting to connect:', { ipAddress, port, deviceName });
+
+      const result: string = await connect(
+        ipAddress.trim(),
+        port.trim(),
+        deviceName.trim()
+      );
+      console.log('connect result:', result);
+
+      // Обновляем результат
+      setResults((prev) => {
+        const newResults = [...prev];
+        const lastIndex = newResults.findIndex(
+          (r) => r.functionName === 'connect'
+        );
+        if (lastIndex !== -1) {
+          const existingResult = newResults[lastIndex];
+          newResults[lastIndex] = {
+            id: existingResult!.id,
+            functionName: existingResult!.functionName,
+            result: JSON.stringify(
+              {
+                status: 'SUCCESS',
+                message: result,
+                connectionParams: {
+                  ipAddress,
+                  port,
+                  deviceName,
+                },
+              },
+              null,
+              2
+            ),
+            timestamp: new Date().toLocaleTimeString(),
+          };
+        }
+        return newResults;
+      });
+
+      Alert.alert('Успех', 'Подключение к кассе выполнено успешно!');
+    } catch (error) {
+      console.error('connect error:', error);
+      addResult('connect', `ERROR: ${(error as Error).message}`);
+      Alert.alert(
+        'Ошибка',
+        `Не удалось подключиться к кассе: ${(error as Error).message}`
+      );
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -160,6 +231,37 @@ export default function App() {
             onChangeText={setInputNumber}
             placeholder="Введите число..."
             keyboardType="numeric"
+          />
+        </View>
+
+        {/* Новый блок для параметров подключения к кассе */}
+        <View style={styles.inputContainer}>
+          <Text style={styles.sectionTitle}>🖨️ Подключение к кассе АТОЛ</Text>
+
+          <Text style={styles.inputLabel}>IP адрес кассы:</Text>
+          <TextInput
+            style={styles.textInput}
+            value={ipAddress}
+            onChangeText={setIpAddress}
+            placeholder="192.168.1.100"
+            keyboardType="numeric"
+          />
+
+          <Text style={styles.inputLabel}>Порт:</Text>
+          <TextInput
+            style={styles.textInput}
+            value={port}
+            onChangeText={setPort}
+            placeholder="5555"
+            keyboardType="numeric"
+          />
+
+          <Text style={styles.inputLabel}>Имя устройства:</Text>
+          <TextInput
+            style={styles.textInput}
+            value={deviceName}
+            onChangeText={setDeviceName}
+            placeholder="АТОЛ Касса"
           />
         </View>
 
@@ -192,6 +294,13 @@ export default function App() {
             title="📞 Call Me Later"
             onPress={testCallMeLater}
             color="#F44336"
+          />
+
+          {/* Новая кнопка для подключения к кассе */}
+          <Button
+            title="🖨️ Подключиться к кассе"
+            onPress={testConnect}
+            color="#FF5722"
           />
         </View>
 
@@ -260,6 +369,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 16,
+    textAlign: 'center',
   },
   inputLabel: {
     fontSize: 16,

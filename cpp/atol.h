@@ -1,10 +1,14 @@
 #pragma once
 
 #include <jsi/jsi.h>
-#include <string>
+#include <jni.h>
 
-using namespace facebook;
+// Declare the JavaVM getter function
+extern JavaVM* getJavaVM();
+
+// Declare the global fptr getter function
+extern jobject getGlobalFptr();
 
 namespace atoljsi {
-    void install(jsi::Runtime &rt);
+    void install(facebook::jsi::Runtime &rt);
 }

@@ -5,6 +5,7 @@ import androidx.annotation.NonNull;
 import com.facebook.react.bridge.JavaScriptContextHolder;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactMethod;
+
 import ru.atol.drivers10.fptr.Fptr;
 import ru.atol.drivers10.fptr.IFptr;
 
@@ -33,6 +34,7 @@ public class AtolModule extends NativeAtolSpec {
         }
     }
 
+    // Return IFptr instead of Fptr to match the method signature
     public static IFptr getFptr() {
         return fptr;
     }
