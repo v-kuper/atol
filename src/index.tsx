@@ -60,3 +60,7 @@ export function connect(
 ): Promise<string> {
   return module.connect(address, port, name);
 }
+
+export function printXReport(): Promise<string> {
+  return module.printXReport();
+}

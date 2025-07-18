@@ -15,7 +15,8 @@ import {
   callMeLater,
   promiseNumber,
   reverseString,
-  connect, // Добавляем импорт функции connect
+  connect,
+  printXReport,
 } from 'react-native-atol';
 
 interface TestResult {
@@ -31,7 +32,7 @@ export default function App() {
   const [inputNumber, setInputNumber] = useState<string>('5');
 
   // Добавляем состояния для параметров подключения к кассе
-  const [ipAddress, setIpAddress] = useState<string>('192.168.1.100');
+  const [ipAddress, setIpAddress] = useState<string>('192.168.0.114');
   const [port, setPort] = useState<string>('5555');
   const [deviceName, setDeviceName] = useState<string>('АТОЛ Касса');
 
@@ -302,6 +303,7 @@ export default function App() {
             onPress={testConnect}
             color="#FF5722"
           />
+          <Button title="🖨️ печать" onPress={printXReport} color="#FF5722" />
         </View>
 
         <View style={styles.resultsContainer}>
