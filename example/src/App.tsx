@@ -8,200 +8,367 @@ import {
   SafeAreaView,
   TextInput,
   Alert,
+  Platform,
 } from 'react-native';
 import {
-  getObject,
-  getNumbers,
-  callMeLater,
-  promiseNumber,
   reverseString,
+  getNumbers,
+  getObject,
   connect,
+  reconnect,
+  checkConnectionStatus,
+  heartbeat,
+  getShiftStatus,
+  openShift,
+  closeShift,
+  cashIncome,
+  cashOutcome,
+  processJson,
+  sellProduct,
+  setDateTime,
+  disconnect,
   printXReport,
 } from 'react-native-atol';
+
+/**
+ * Пояснения к обновлению:
+ * - Из native-модуля убраны функции callMeLater / promiseNumber / formatEpoch (их нет в новом C++ коде).
+ * - Добавлен локальный helper formatEpoch().
+ * - Упрощён блок "Базовые тесты" (оставлены только поддерживаемые функции).
+ * - Улучшено отображение статуса подключения (state connectionInfo).
+ * - Добавлена защитная проверка наличия методов (если вдруг версия native отлична).
+ */
 
 interface TestResult {
   id: number;
   functionName: string;
   result: string;
   timestamp: string;
+  isError?: boolean;
 }
+
+const safeStringify = (value: any) => {
+  try {
+    if (value === undefined) return 'undefined';
+    if (value === null) return 'null';
+    return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  } catch (e) {
+    return String(value);
+  }
+};
+
+// Локальная реализация formatEpoch (ms -> строка)
+const formatEpoch = (ms?: number) => {
+  if (!ms || ms <= 0) return '—';
+  try {
+    const d = new Date(ms);
+    return (
+      d.getFullYear() +
+      '-' +
+      String(d.getMonth() + 1).padStart(2, '0') +
+      '-' +
+      String(d.getDate()).padStart(2, '0') +
+      ' ' +
+      String(d.getHours()).padStart(2, '0') +
+      ':' +
+      String(d.getMinutes()).padStart(2, '0') +
+      ':' +
+      String(d.getSeconds()).padStart(2, '0')
+    );
+  } catch {
+    return String(ms);
+  }
+};
 
 export default function App() {
   const [results, setResults] = useState<TestResult[]>([]);
   const [inputText, setInputText] = useState<string>('Hello World');
-  const [inputNumber, setInputNumber] = useState<string>('5');
 
-  // Добавляем состояния для параметров подключения к кассе
+  console.log(results)
+
+  // Параметры подключения
   const [ipAddress, setIpAddress] = useState<string>('192.168.0.114');
   const [port, setPort] = useState<string>('5555');
   const [deviceName, setDeviceName] = useState<string>('АТОЛ Касса');
 
-  const addResult = (functionName: string, result: any): void => {
+  // Кассовые операции
+  const [cashierName, setCashierName] = useState<string>('КАССИР 1');
+  const [amount, setAmount] = useState<string>('100.00');
+
+  // JSON для операций
+  const [jsonTask, setJsonTask] = useState<string>(`{
+  "type": "sell",
+  "items": [
+    { "name": "Товар", "price": 100.00, "quantity": 1, "tax": 1 }
+  ],
+  "payments": [ { "type": 1, "sum": 100.00 } ]
+}`);
+
+  // Дата / время
+  const [dateTimeStr, setDateTimeStr] = useState<string>('2025-01-01 10:00:00');
+
+  // Краткая сводка подключения
+  const [connectionInfo, setConnectionInfo] = useState<{
+    isConnected?: boolean;
+    modelName?: string;
+    shiftState?: number;
+    cashSum?: number;
+  }>({});
+
+  const addResult = (
+    functionName: string,
+    result: any,
+    isError: boolean = false
+  ): void => {
     const timestamp = new Date().toLocaleTimeString();
-    const id = Date.now();
+    const id = Date.now() + Math.random();
     setResults((prev) => [
-      {
-        id,
-        functionName,
-        result: JSON.stringify(result, null, 2),
-        timestamp,
-      },
+      { id, functionName, result: safeStringify(result), timestamp, isError },
       ...prev,
     ]);
   };
 
-  const clearResults = (): void => {
-    setResults([]);
+  const updatePendingResult = (
+    functionName: string,
+    newValue: any,
+    isError = false
+  ) => {
+    setResults((prev) =>
+      prev.map((r) =>
+        r.functionName === functionName && r.result.startsWith('...')
+          ? { ...r, result: safeStringify(newValue), isError }
+          : r
+      )
+    );
   };
 
-  const testReverseString = (): void => {
+  const markError = (fn: string, error: any) => {
+    updatePendingResult(fn, `ERROR: ${String(error)}`, true);
+  };
+
+  const clearResults = () => setResults([]);
+
+  // ---- Базовые тесты (оставлены только поддерживаемые) ----
+  const testReverseString = () => {
     try {
-      const result: string = reverseString(inputText);
-      console.log('reverseString result:', result);
-      addResult('reverseString', result);
-    } catch (error) {
-      console.error('reverseString error:', error);
-      addResult('reverseString', `ERROR: ${(error as Error).message}`);
+      addResult('reverseString', reverseString(inputText));
+    } catch (e) {
+      addResult('reverseString', `ERROR: ${String(e)}`, true);
     }
   };
 
-  const testGetNumbers = (): void => {
+  const testGetNumbers = () => {
     try {
-      const result: number[] = getNumbers();
-      console.log('getNumbers result:', result);
-      addResult('getNumbers', result);
-    } catch (error) {
-      console.error('getNumbers error:', error);
-      addResult('getNumbers', `ERROR: ${(error as Error).message}`);
+      addResult('getNumbers', getNumbers());
+    } catch (e) {
+      addResult('getNumbers', `ERROR: ${String(e)}`, true);
     }
   };
 
-  const testGetObject = (): void => {
+  const testGetObject = () => {
     try {
-      const result = getObject();
-      console.log('getObject result:', result);
-      addResult('getObject', result);
-    } catch (error) {
-      console.error('getObject error:', error);
-      addResult('getObject', `ERROR: ${(error as Error).message}`);
+      addResult('getObject', getObject());
+    } catch (e) {
+      addResult('getObject', `ERROR: ${String(e)}`, true);
     }
   };
 
-  const testPromiseNumber = async (): Promise<void> => {
-    try {
-      const numberValue = parseFloat(inputNumber);
-      if (isNaN(numberValue)) {
-        Alert.alert('Ошибка', 'Введите корректное число');
-        return;
-      }
-
-      addResult('promiseNumber', 'Ожидание результата...');
-      const result: number = await promiseNumber(numberValue);
-      console.log('promiseNumber result:', result);
-
-      setResults((prev) => {
-        const newResults = [...prev];
-        const lastIndex = newResults.findIndex(
-          (r) => r.functionName === 'promiseNumber'
-        );
-        if (lastIndex !== -1) {
-          const existingResult = newResults[lastIndex];
-          newResults[lastIndex] = {
-            id: existingResult!.id,
-            functionName: existingResult!.functionName,
-            result: JSON.stringify(result, null, 2),
-            timestamp: new Date().toLocaleTimeString(),
-          };
-        }
-        return newResults;
-      });
-    } catch (error) {
-      console.error('promiseNumber error:', error);
-      addResult('promiseNumber', `ERROR: ${(error as Error).message}`);
+  // ---- Подключение ----
+  const testConnect = async () => {
+    if (!ipAddress.trim()) {
+      Alert.alert('Ошибка', 'Введите IP адрес');
+      return;
     }
-  };
-
-  const testCallMeLater = (): void => {
-    try {
-      addResult('callMeLater', 'Вызов callback функций...');
-      callMeLater(
-        () => {
-          console.log('callMeLater success callback');
-          addResult('callMeLater SUCCESS', 'Success callback выполнен');
-        },
-        () => {
-          console.log('callMeLater failure callback');
-          addResult('callMeLater FAILURE', 'Failure callback выполнен');
-        }
-      );
-    } catch (error) {
-      console.error('callMeLater error:', error);
-      addResult('callMeLater', `ERROR: ${(error as Error).message}`);
+    if (!port.trim() || isNaN(Number(port))) {
+      Alert.alert('Ошибка', 'Введите корректный порт');
+      return;
     }
-  };
-
-  // Новая функция для тестирования подключения к кассе
-  const testConnect = async (): Promise<void> => {
+    addResult('connect', '... подключение');
     try {
-      // Валидация входных данных
-      if (!ipAddress.trim()) {
-        Alert.alert('Ошибка', 'Введите IP адрес кассы');
-        return;
-      }
-
-      if (!port.trim() || isNaN(parseInt(port))) {
-        Alert.alert('Ошибка', 'Введите корректный порт');
-        return;
-      }
-
-      addResult('connect', 'Подключение к кассе...');
-      console.log('Attempting to connect:', { ipAddress, port, deviceName });
-
-      const result: string = await connect(
+      const r: any = await (connect as any)(
         ipAddress.trim(),
         port.trim(),
         deviceName.trim()
       );
-      console.log('connect result:', result);
-
-      // Обновляем результат
-      setResults((prev) => {
-        const newResults = [...prev];
-        const lastIndex = newResults.findIndex(
-          (r) => r.functionName === 'connect'
-        );
-        if (lastIndex !== -1) {
-          const existingResult = newResults[lastIndex];
-          newResults[lastIndex] = {
-            id: existingResult!.id,
-            functionName: existingResult!.functionName,
-            result: JSON.stringify(
-              {
-                status: 'SUCCESS',
-                message: result,
-                connectionParams: {
-                  ipAddress,
-                  port,
-                  deviceName,
-                },
-              },
-              null,
-              2
-            ),
-            timestamp: new Date().toLocaleTimeString(),
-          };
-        }
-        return newResults;
+      updatePendingResult('connect', r);
+      setConnectionInfo({
+        isConnected: r?.isConnected,
+        modelName: r?.modelName,
+        shiftState: r?.shiftState,
+        cashSum: r?.cashSum,
       });
+      Alert.alert('Успех', 'Подключено');
+    } catch (e) {
+      markError('connect', e);
+      console.log('connect', e);
+      Alert.alert('Ошибка', String(e));
+    }
+  };
 
-      Alert.alert('Успех', 'Подключение к кассе выполнено успешно!');
-    } catch (error) {
-      console.error('connect error:', error);
-      addResult('connect', `ERROR: ${(error as Error).message}`);
-      Alert.alert(
-        'Ошибка',
-        `Не удалось подключиться к кассе: ${(error as Error).message}`
+  const testReconnect = async () => {
+    addResult('reconnect', '... переподключение');
+    try {
+      const r: any = await (reconnect as any)(
+        ipAddress.trim(),
+        port.trim(),
+        deviceName.trim()
       );
+      updatePendingResult('reconnect', r);
+      setConnectionInfo({
+        isConnected: r?.isConnected,
+        modelName: r?.modelName,
+        shiftState: r?.shiftState,
+        cashSum: r?.cashSum,
+      });
+    } catch (e) {
+      markError('reconnect', e);
+    }
+  };
+
+  const testCheckConnection = async () => {
+    addResult('checkConnectionStatus', '... проверка');
+    try {
+      const r: any = await (checkConnectionStatus as any)();
+      updatePendingResult('checkConnectionStatus', r);
+      setConnectionInfo((ci) => ({ ...ci, isConnected: r?.isConnected }));
+    } catch (e) {
+      markError('checkConnectionStatus', e);
+    }
+  };
+
+  const testHeartbeat = async () => {
+    addResult('heartbeat', '... отправка');
+    try {
+      const r: any = await (heartbeat as any)();
+      updatePendingResult('heartbeat', r);
+    } catch (e) {
+      markError('heartbeat', e);
+    }
+  };
+
+  // ---- Смена ----
+  const testGetShiftStatus = async () => {
+    addResult('getShiftStatus', '... запрос');
+    try {
+      const r: any = await (getShiftStatus as any)();
+      if (r && r.dateTime) r.readableDate = formatEpoch(r.dateTime);
+      updatePendingResult('getShiftStatus', r);
+      setConnectionInfo((ci) => ({
+        ...ci,
+        shiftState: r?.shiftState,
+        cashSum: r?.cashSum,
+      }));
+    } catch (e) {
+      markError('getShiftStatus', e);
+    }
+  };
+
+  const testOpenShift = async () => {
+    addResult('openShift', '... открытие');
+    try {
+      const r: any = await (openShift as any)(cashierName.trim());
+      updatePendingResult('openShift', r);
+    } catch (e) {
+      markError('openShift', e);
+    }
+  };
+
+  const testCloseShift = async () => {
+    addResult('closeShift', '... закрытие');
+    try {
+      const r: any = await (closeShift as any)(cashierName.trim());
+      updatePendingResult('closeShift', r);
+    } catch (e) {
+      markError('closeShift', e);
+    }
+  };
+
+  // ---- Деньги ----
+  const testCashIncome = async () => {
+    const val = parseFloat(amount);
+    if (isNaN(val)) {
+      Alert.alert('Ошибка', 'Введите корректную сумму');
+      return;
+    }
+    addResult('cashIncome', '... внесение');
+    try {
+      const r: any = await (cashIncome as any)(val, cashierName.trim());
+      updatePendingResult('cashIncome', r);
+      if (r?.cashSum != null)
+        setConnectionInfo((ci) => ({ ...ci, cashSum: r.cashSum }));
+    } catch (e) {
+      markError('cashIncome', e);
+    }
+  };
+
+  const testCashOutcome = async () => {
+    const val = parseFloat(amount);
+    if (isNaN(val)) {
+      Alert.alert('Ошибка', 'Введите корректную сумму');
+      return;
+    }
+    addResult('cashOutcome', '... изъятие');
+    try {
+      const r: any = await (cashOutcome as any)(val, cashierName.trim());
+      updatePendingResult('cashOutcome', r);
+      if (r?.cashSum != null)
+        setConnectionInfo((ci) => ({ ...ci, cashSum: r.cashSum }));
+    } catch (e) {
+      markError('cashOutcome', e);
+    }
+  };
+
+  // ---- JSON ----
+  const testProcessJson = async () => {
+    addResult('processJson', '... обработка');
+    try {
+      const r: any = await (processJson as any)(jsonTask);
+      updatePendingResult('processJson', r);
+    } catch (e) {
+      markError('processJson', e);
+    }
+  };
+
+  const testSellProduct = async () => {
+    addResult('sellProduct', '... продажа');
+    try {
+      const r: any = await (sellProduct as any)(jsonTask);
+      updatePendingResult('sellProduct', r);
+    } catch (e) {
+      markError('sellProduct', e);
+    }
+  };
+
+  // ---- Время ----
+  const testSetDateTime = async () => {
+    addResult('setDateTime', '... установка');
+    try {
+      const r: any = await (setDateTime as any)(dateTimeStr.trim());
+      updatePendingResult('setDateTime', r);
+    } catch (e) {
+      markError('setDateTime', e);
+    }
+  };
+
+  // ---- Отключение ----
+  const testDisconnect = async () => {
+    addResult('disconnect', '... отключение');
+    try {
+      const r: any = await (disconnect as any)();
+      updatePendingResult('disconnect', r);
+      setConnectionInfo((ci) => ({ ...ci, isConnected: false }));
+    } catch (e) {
+      markError('disconnect', e);
+    }
+  };
+
+  const testPrintXReport = async () => {
+    addResult('printXReport', '... печать');
+    try {
+      const r: any = await (printXReport as any)();
+      updatePendingResult('printXReport', r);
+    } catch (e) {
+      markError('printXReport', e);
     }
   };
 
@@ -210,13 +377,37 @@ export default function App() {
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         <View style={styles.header}>
           <Text style={styles.title}>Тестирование JSI функций</Text>
-          <Text style={styles.subtitle}>react-native-atol</Text>
+          <Text style={styles.subtitle}>react-native-atol (обновлено)</Text>
+          <View style={styles.statusRow}>
+            <Text style={styles.statusLabel}>Статус:</Text>
+            <Text
+              style={[
+                styles.statusValue,
+                { color: connectionInfo.isConnected ? '#4CAF50' : '#F44336' },
+              ]}
+            >
+              {connectionInfo.isConnected ? 'Подключено' : 'Нет соединения'}
+            </Text>
+          </View>
+          {connectionInfo.modelName && (
+            <Text style={styles.statusMeta}>
+              Модель: {connectionInfo.modelName}
+            </Text>
+          )}
+          {connectionInfo.cashSum != null && (
+            <Text style={styles.statusMeta}>
+              Cash: {connectionInfo.cashSum}
+            </Text>
+          )}
         </View>
 
+        {/* Базовые тесты */}
         <View style={styles.inputContainer}>
+          <Text style={styles.sectionTitle}>🔧 Базовые тесты</Text>
           <Text style={styles.inputLabel}>Текст для reverseString:</Text>
           <TextInput
             style={styles.textInput}
@@ -224,30 +415,31 @@ export default function App() {
             onChangeText={setInputText}
             placeholder="Введите текст..."
           />
-
-          <Text style={styles.inputLabel}>Число для promiseNumber:</Text>
-          <TextInput
-            style={styles.textInput}
-            value={inputNumber}
-            onChangeText={setInputNumber}
-            placeholder="Введите число..."
-            keyboardType="numeric"
-          />
+          <View style={styles.rowButtons}>
+            <Button
+              title="🔄 Reverse"
+              onPress={testReverseString}
+              color="#2196F3"
+            />
+            <Button
+              title="📊 Numbers"
+              onPress={testGetNumbers}
+              color="#4CAF50"
+            />
+            <Button title="📦 Object" onPress={testGetObject} color="#FF9800" />
+          </View>
         </View>
 
-        {/* Новый блок для параметров подключения к кассе */}
+        {/* Подключение */}
         <View style={styles.inputContainer}>
-          <Text style={styles.sectionTitle}>🖨️ Подключение к кассе АТОЛ</Text>
-
-          <Text style={styles.inputLabel}>IP адрес кассы:</Text>
+          <Text style={styles.sectionTitle}>🖨️ Подключение к кассе</Text>
+          <Text style={styles.inputLabel}>IP адрес:</Text>
           <TextInput
             style={styles.textInput}
             value={ipAddress}
             onChangeText={setIpAddress}
             placeholder="192.168.1.100"
-            keyboardType="numeric"
           />
-
           <Text style={styles.inputLabel}>Порт:</Text>
           <TextInput
             style={styles.textInput}
@@ -256,7 +448,6 @@ export default function App() {
             placeholder="5555"
             keyboardType="numeric"
           />
-
           <Text style={styles.inputLabel}>Имя устройства:</Text>
           <TextInput
             style={styles.textInput}
@@ -264,63 +455,157 @@ export default function App() {
             onChangeText={setDeviceName}
             placeholder="АТОЛ Касса"
           />
+          <View style={styles.rowButtons}>
+            <Button title="🖨️ Connect" onPress={testConnect} color="#FF5722" />
+            <Button
+              title="🔁 Reconnect"
+              onPress={testReconnect}
+              color="#795548"
+            />
+          </View>
+          <View style={styles.rowButtons}>
+            <Button
+              title="✅ Heartbeat"
+              onPress={testHeartbeat}
+              color="#3F51B5"
+            />
+            <Button
+              title="🔍 Status"
+              onPress={testCheckConnection}
+              color="#607D8B"
+            />
+          </View>
+          <View style={styles.rowButtons}>
+            <Button
+              title="❌ Disconnect"
+              onPress={testDisconnect}
+              color="#9E9E9E"
+            />
+            <Button
+              title="🧾 X Report"
+              onPress={testPrintXReport}
+              color="#009688"
+            />
+          </View>
         </View>
 
-        <View style={styles.buttonContainer}>
-          <Button
-            title="🔄 Reverse String"
-            onPress={testReverseString}
-            color="#2196F3"
+        {/* Смена */}
+        <View style={styles.inputContainer}>
+          <Text style={styles.sectionTitle}>🕓 Смена</Text>
+          <Text style={styles.inputLabel}>Имя кассира:</Text>
+          <TextInput
+            style={styles.textInput}
+            value={cashierName}
+            onChangeText={setCashierName}
+            placeholder="КАССИР"
           />
-
-          <Button
-            title="📊 Get Numbers"
-            onPress={testGetNumbers}
-            color="#4CAF50"
-          />
-
-          <Button
-            title="📦 Get Object"
-            onPress={testGetObject}
-            color="#FF9800"
-          />
-
-          <Button
-            title="⏱️ Promise Number"
-            onPress={testPromiseNumber}
-            color="#9C27B0"
-          />
-
-          <Button
-            title="📞 Call Me Later"
-            onPress={testCallMeLater}
-            color="#F44336"
-          />
-
-          {/* Новая кнопка для подключения к кассе */}
-          <Button
-            title="🖨️ Подключиться к кассе"
-            onPress={testConnect}
-            color="#FF5722"
-          />
-          <Button title="🖨️ печать" onPress={printXReport} color="#FF5722" />
+          <View style={styles.rowButtons}>
+            <Button title="🔓 Open" onPress={testOpenShift} color="#4CAF50" />
+            <Button title="🔒 Close" onPress={testCloseShift} color="#E91E63" />
+            <Button
+              title="ℹ️ Status"
+              onPress={testGetShiftStatus}
+              color="#2196F3"
+            />
+          </View>
         </View>
 
+        {/* Деньги */}
+        <View style={styles.inputContainer}>
+          <Text style={styles.sectionTitle}>💰 Денежные операции</Text>
+          <Text style={styles.inputLabel}>Сумма:</Text>
+          <TextInput
+            style={styles.textInput}
+            value={amount}
+            onChangeText={setAmount}
+            placeholder="100.00"
+            keyboardType="numeric"
+          />
+          <View style={styles.rowButtons}>
+            <Button
+              title="⬆️ Income"
+              onPress={testCashIncome}
+              color="#8BC34A"
+            />
+            <Button
+              title="⬇️ Outcome"
+              onPress={testCashOutcome}
+              color="#FF5722"
+            />
+          </View>
+        </View>
+
+        {/* JSON */}
+        <View style={styles.inputContainer}>
+          <Text style={styles.sectionTitle}>🧾 JSON операции</Text>
+          <Text style={styles.inputLabel}>JSON Task:</Text>
+          <TextInput
+            style={[styles.textInput, styles.jsonInput]}
+            value={jsonTask}
+            onChangeText={setJsonTask}
+            multiline
+            numberOfLines={8}
+            textAlignVertical="top"
+          />
+          <View style={styles.rowButtons}>
+            <Button
+              title="⚙️ processJson"
+              onPress={testProcessJson}
+              color="#9C27B0"
+            />
+            <Button
+              title="🛒 sellProduct"
+              onPress={testSellProduct}
+              color="#673AB7"
+            />
+          </View>
+        </View>
+
+        {/* Время */}
+        <View style={styles.inputContainer}>
+          <Text style={styles.sectionTitle}>🕒 Установка времени</Text>
+          <Text style={styles.inputLabel}>
+            Дата/время (yyyy-MM-dd HH:mm:ss):
+          </Text>
+          <TextInput
+            style={styles.textInput}
+            value={dateTimeStr}
+            onChangeText={setDateTimeStr}
+            placeholder="2025-01-01 10:00:00"
+          />
+          <Button
+            title="🗓️ setDateTime"
+            onPress={testSetDateTime}
+            color="#3F51B5"
+          />
+        </View>
+
+        {/* Результаты */}
         <View style={styles.resultsContainer}>
           <View style={styles.resultsHeader}>
-            <Text style={styles.resultsTitle}>Результаты:</Text>
+            <Text style={styles.resultsTitle}>Результаты</Text>
             <Button title="Очистить" onPress={clearResults} color="#757575" />
           </View>
-
           {results.length === 0 ? (
-            <Text style={styles.noResults}>
-              Нет результатов для отображения
-            </Text>
+            <Text style={styles.noResults}>Нет результатов</Text>
           ) : (
             results.map((item) => (
-              <View key={item.id} style={styles.resultItem}>
+              <View
+                key={item.id}
+                style={[
+                  styles.resultItem,
+                  item.isError && { borderLeftColor: '#F44336' },
+                ]}
+              >
                 <View style={styles.resultHeader}>
-                  <Text style={styles.resultFunction}>{item.functionName}</Text>
+                  <Text
+                    style={[
+                      styles.resultFunction,
+                      item.isError && { color: '#F44336' },
+                    ]}
+                  >
+                    {item.functionName}
+                  </Text>
                   <Text style={styles.resultTime}>{item.timestamp}</Text>
                 </View>
                 <Text style={styles.resultText}>{item.result}</Text>
@@ -333,107 +618,86 @@ export default function App() {
   );
 }
 
+// ---- Стили ----
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  scrollView: {
-    flex: 1,
-    paddingHorizontal: 16,
-  },
-  header: {
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  scrollView: { flex: 1, paddingHorizontal: 16 },
+  header: { alignItems: 'center', paddingVertical: 20, marginBottom: 12 },
+  title: { fontSize: 24, fontWeight: 'bold', color: '#333', marginBottom: 4 },
+  subtitle: { fontSize: 14, color: '#666', fontStyle: 'italic' },
+  statusRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 6,
     alignItems: 'center',
-    paddingVertical: 20,
-    marginBottom: 20,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-    fontStyle: 'italic',
-  },
+  statusLabel: { fontSize: 14, fontWeight: '600', color: '#444' },
+  statusValue: { fontSize: 14, fontWeight: '700' },
+  statusMeta: { fontSize: 12, color: '#555', marginTop: 2 },
+
   inputContainer: {
     backgroundColor: '#fff',
-    borderRadius: 8,
+    borderRadius: 10,
     padding: 16,
-    marginBottom: 20,
+    marginBottom: 18,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 4,
+    elevation: 3,
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 16,
+    fontWeight: '600',
+    color: '#222',
+    marginBottom: 14,
     textAlign: 'center',
   },
   inputLabel: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: '#333',
-    marginBottom: 8,
+    marginBottom: 6,
+    marginTop: 4,
   },
   textInput: {
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 6,
     padding: 12,
-    fontSize: 16,
-    marginBottom: 16,
+    fontSize: 15,
+    marginBottom: 12,
     backgroundColor: '#fafafa',
   },
-  buttonContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 20,
-    gap: 12,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
+  jsonInput: {
+    minHeight: 160,
+    fontFamily: Platform.select({
+      ios: 'Menlo',
+      android: 'monospace',
+      default: 'monospace',
+    }),
   },
+  rowButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 12,
+  },
+
   resultsContainer: {
     backgroundColor: '#fff',
-    borderRadius: 8,
+    borderRadius: 10,
     padding: 16,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
+    marginBottom: 30,
+    elevation: 3,
   },
   resultsHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 14,
   },
-  resultsTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-  },
+  resultsTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
   noResults: {
     textAlign: 'center',
     color: '#999',
@@ -443,30 +707,26 @@ const styles = StyleSheet.create({
   resultItem: {
     backgroundColor: '#f8f9fa',
     borderRadius: 6,
-    padding: 12,
-    marginBottom: 12,
+    padding: 10,
+    marginBottom: 10,
     borderLeftWidth: 4,
     borderLeftColor: '#2196F3',
   },
   resultHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
-  resultFunction: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#2196F3',
-  },
-  resultTime: {
-    fontSize: 12,
-    color: '#666',
-  },
+  resultFunction: { fontSize: 15, fontWeight: '600', color: '#2196F3' },
+  resultTime: { fontSize: 11, color: '#666' },
   resultText: {
-    fontSize: 14,
-    color: '#333',
-    fontFamily: 'monospace',
+    fontSize: 13,
+    color: '#222',
+    fontFamily: Platform.select({
+      ios: 'Menlo',
+      android: 'monospace',
+      default: 'monospace',
+    }),
     backgroundColor: '#fff',
     padding: 8,
     borderRadius: 4,
